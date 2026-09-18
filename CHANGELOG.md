@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1 — 2026-09-18
+
+- The extension now has its own icon in the Marketplace and the Extensions view.
+
+**한국어**
+
+- 마켓플레이스와 확장 목록에 이 확장만의 아이콘이 생김
+
 ## 0.1.0 — 2026-09-18
 
 - First feature: **Check DLL Dependencies**. Right-click an `.exe` or `.dll` to see every DLL

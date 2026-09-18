@@ -2,9 +2,10 @@
   "name": "native-toolbelt",
   "displayName": "Native Toolbelt",
   "description": "Tools for native development on Windows. Starting with: which DLLs an executable needs, and which of them this machine cannot find.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "Ruminem",
   "license": "Apache-2.0",
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/Ruminem/native-toolbelt.git"
