@@ -1,0 +1,45 @@
+{
+  "name": "native-toolbelt",
+  "displayName": "Native Toolbelt",
+  "description": "Tools for native development on Windows. Starting with: which DLLs an executable needs, and which of them this machine cannot find.",
+  "version": "0.1.0",
+  "publisher": "Ruminem",
+  "license": "Apache-2.0",
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "c++",
+    "dll",
+    "pe",
+    "dependencies",
+    "windows"
+  ],
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "main": "./extension.js",
+  "l10n": "./l10n",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "nativeToolbelt.checkDlls",
+        "title": "%command.checkDlls%"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "nativeToolbelt.checkDlls",
+          "when": "resourceExtname == .exe || resourceExtname == .dll",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node test.js",
+    "package": "npx --yes @vscode/vsce@3 package --allow-missing-repository"
+  }
+}
