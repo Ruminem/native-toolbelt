@@ -2,11 +2,12 @@
 
 - **여기까지 됨** — DLL 의존성 점검 기능 하나로 시작함. PE 파일을 직접 읽어 일반·지연 임포트를
   뽑고 윈도우 검색 순서(exe 폴더 → System32/SysWOW64 → PATH)대로 찾음. 못 찾은 것이 바이너리
-  폴더 안에 있으면 그 경로를 같이 알려 줌. `notepad.exe`(64·32비트)와 `Code.exe` 로 확인했고
-  `npm test` 통과, vsix 생성됨. GitHub public 저장소와 프로필 README 등록까지 끝남. **아직
-  릴리스 태그도 마켓플레이스 게시도 안 함.**
-- **다음 할 것** — 설치해서 실제 빌드 산출물로 한 번 돌려 볼 것
-  (`node c:\dev\vsx-tools\vsx.js install native-toolbelt`). 그다음 아래 후보 중 하나를 붙임.
+  폴더 안에 있으면 그 경로를 같이 알려 줌. 설치해서 실제 빌드 산출물(Catch2 MinGW 빌드)로 대조
+  실험까지 함 — PATH 가 정상이면 "0 missing" 이고 실제로 돌아가며, PATH 에서 mingw 를 빼면
+  `libgcc_s_seh-1.dll`·`libstdc++-6.dll` 을 못 찾는다고 보고하고 실행도 `0xC0000135` 로 죽음.
+  **v0.1.0 태그·GitHub 릴리스·마켓플레이스 게시까지 끝남**
+  (https://marketplace.visualstudio.com/items?itemName=Ruminem.native-toolbelt).
+- **다음 할 것** — 아래 후보 중 하나를 붙임. 가장 작은 것은 "전처리·어셈블리 열기".
 - **막힌 것** — 없음. 로더가 실행 중에 추가하는 경로는 밖에서 볼 수 없어 "못 찾음" 으로 나옴
   (`Code.exe` 의 `ffmpeg.dll` 이 그 예). README 에 한계로 적어 둠.
 
