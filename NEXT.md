@@ -42,7 +42,28 @@
 - **전처리·어셈블리 열기** — 현재 파일의 컴파일 명령을 `compile_commands.json` 에서 꺼내
   전처리 결과나 어셈블리를 새 탭에. 가장 작음
 - **크래시 덤프 열기** — `.dmp` 에서 `cdb` 로 콜스택을 뽑아 편집기로. 우리 소스면 그 줄로 이동.
-  **이 PC 에 `cdb` 가 있는지 아직 확인 안 함** (VS Build Tools 만 깔았고 디버깅 도구는 별도)
+  **이 PC 에 `cdb` 없음** (2026-09-19 확인 — PATH 와 `Windows Kits\10\Debuggers` 둘 다 없음.
+  디버깅 도구를 따로 깔아야 함)
+
+죽은 뒤의 텍스트를 풀어 주는 것 (2026-09-19 검토). 링크 에러 해독과 같은 꼴 — 도구가 이미 찍은
+출력을 파싱해 프레임 목록을 띄우고 소스 줄로 이동. 분석은 직접 안 함. 실행 중 디버깅 UI(중단점·
+변수·스텝)는 cpptools·CodeLLDB 가 이미 하므로 안 만듦:
+
+- **gdb 콜스택** — `gdb -batch -ex "thread apply all bt"` 나 gdb/MI 출력, 또는 클립보드·CI 로그에
+  찍힌 backtrace 를 파싱. 쉬움. 이 PC 에 gdb 17.2(WinLibs MinGW, 파이썬 켜짐)와 lldb(LLVM 22) 있음.
+  **안 재 본 것**: MinGW gdb 가 clang/MSVC 의 PDB 심볼을 읽는지. 못 읽으면(추정) MinGW 빌드 전용이
+  되고 MSVC 빌드는 `lldb` 나 `cdb` 로 가야 함
+- **메모리 오염** — ASan 리포트(`heap-use-after-free`, `heap-buffer-overflow`)를 파싱해 접근·할당·
+  해제 스택 세 개를 나란히. 쉬움~중간. ASan 런타임은 clang 22 와 MSVC 14.44 에 있고 MinGW GCC 에는
+  `libasan` 이 없음. **안 재 본 것**: 윈도우 ASan 리포트의 프레임 줄 형식 실물 — 작은
+  use-after-free 예제를 clang 으로 빌드해 한 번 찍어 보면 됨
+- **메모리 릭** — 윈도우에서 막힘. LeakSanitizer 가 윈도우를 지원 안 함(아는 것, 돌려 보진 않음).
+  남는 길은 MSVC CRT 디버그 힙(`_CrtDumpMemoryLeaks` 출력 파싱) · UMDH(디버깅 도구 설치 필요) ·
+  Dr. Memory(LGPL — 번들 말고 호출만). 도구부터 정해야 해서 v0 에서는 뺌
+
+v0 로 잡으면 "클립보드의 gdb backtrace / ASan 리포트 → 프레임 목록 → 소스로 이동" 명령 하나.
+두 형식 다 `#N 0x… in func file:line` 꼴이라 파서 하나에 정규식 둘. 주로 어떤 빌드(MinGW gcc /
+clang / MSVC)의 문제를 볼지가 콜스택 쪽 도구를 가름 — 아직 안 정함
 
 스크립트로 먼저 재 보고 쓸 만하면 기능으로 올릴 것 (결과가 보고서라 UI 없이도 판단됨):
 
