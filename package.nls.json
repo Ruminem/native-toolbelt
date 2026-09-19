@@ -1,3 +1,4 @@
 {
-  "command.checkDlls": "Native Toolbelt: Check DLL Dependencies"
+  "command.checkDlls": "Native Toolbelt: Check DLL Dependencies",
+  "command.decodeLinkError": "Native Toolbelt: Decode Link Error"
 }

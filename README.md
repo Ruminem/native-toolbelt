@@ -34,6 +34,45 @@ program adds while running. Anything reported as **found** is found; anything re
 **missing** may still be supplied by one of those. VS Code's own `Code.exe` is an example:
 it loads `ffmpeg.dll` from a versioned subfolder.
 
+## Decode a link error
+
+Copy the linker output, or select it, and run **Native Toolbelt: Decode Link Error**. For
+every `LNK2019` and `LNK2001` it names the symbol and lists the libraries on this machine
+that define it.
+
+```
+LNK2019  ?declared_but_never_defined@@YAXH@Z
+      in no library here — so it is missing from your own build
+
+LNK2019  CreateFileW
+      kernel32.Lib  (arm64, x64, x86)
+      mincore.lib  (arm64, x64, x86)
+      OneCore.Lib  (arm64, x64, x86)
+
+searched 1524 libraries
+```
+
+Nothing has to be installed for this either. A static library carries the linker's own
+symbol index in its first member, so answering *who defines this?* means reading 22 MB out
+of a 600 MB SDK instead of starting `dumpbin` fifteen hundred times — under a second.
+
+The architectures are part of the answer: a symbol found only under `x86` is the
+32-bit/64-bit mismatch that the error message itself never mentions.
+
+### Why not just read the docs
+
+MS documents LNK2019 well and lists eighteen ways to cause it. What no document can list is
+what is installed on your machine, which is the part that tells those eighteen apart — and
+its own advice for that is to run `dumpbin` over your libraries by hand.
+
+### Localized linker messages
+
+In a Korean Visual Studio the English *referenced in function* is an empty string, so the
+linker prints `plain_c_functionmain`: the symbol and the function that referenced it spelled
+as one word. Rather than guess where the seam falls, this offers every prefix to the
+archives and keeps the longest one something actually defines. When nothing matches, the
+symbol is missing everywhere anyway, and it is reported under its fused name.
+
 ## Build
 
 No dependencies to install.
@@ -82,6 +121,43 @@ C:\work\app\build\app.exe  (x64)
 로더는 side-by-side 매니페스트, `.local` 리디렉션, 프로그램이 실행 중에 추가하는 디렉터리도
 같이 봄. **찾음**이라고 한 것은 확실히 찾는 것이지만, **못 찾음**이라고 한 것은 그중 하나로
 공급될 수도 있음. VS Code의 `Code.exe`가 그런 예임 — `ffmpeg.dll`을 버전 하위 폴더에서 불러옴.
+
+### 링크 에러 해독
+
+링커 출력을 복사하거나 선택한 뒤 **Native Toolbelt: 링크 에러 해독**을 실행함. `LNK2019`와
+`LNK2001` 줄마다 심볼 이름을 뽑고, 이 PC 에서 그 심볼을 정의하는 라이브러리를 나열함.
+
+```
+LNK2019  ?declared_but_never_defined@@YAXH@Z
+      이 PC 의 어느 라이브러리에도 없음 — 내 빌드에서 빠진 것임
+
+LNK2019  CreateFileW
+      kernel32.Lib  (arm64, x64, x86)
+      mincore.lib  (arm64, x64, x86)
+      OneCore.Lib  (arm64, x64, x86)
+
+라이브러리 1524개를 뒤짐
+```
+
+이것도 설치할 것이 없음. 정적 라이브러리는 첫 멤버에 링커가 쓰는 심볼 인덱스를 들고 있어서,
+*누가 이걸 정의하나?* 에 답하는 데 600MB 짜리 SDK 중 22MB 만 읽으면 됨 — `dumpbin` 을 천오백
+번 띄우는 대신 1초 안임.
+
+아키텍처도 답의 일부임. `x86` 아래에서만 나온 심볼은 에러 메시지가 한마디도 안 하는 32비트·
+64비트 불일치임.
+
+### 문서를 읽으면 되지 않나
+
+MS 는 LNK2019 를 잘 설명해 두었고 원인을 열여덟 가지나 적어 둠. 어느 문서도 못 적는 것은 내 PC
+에 무엇이 깔려 있느냐인데, 그 열여덟 가지를 가르는 게 바로 그것임. 그리고 그 문서가 시키는
+방법이 `dumpbin` 을 라이브러리마다 손으로 돌려 보라는 것임.
+
+### 번역된 링커 메시지
+
+한국어 Visual Studio 에서는 영어의 *referenced in function* 이 빈 문자열이라 링커가
+`plain_c_functionmain` 처럼 찍음 — 심볼과 그걸 참조한 함수가 한 단어로 붙어 나옴. 경계가
+어디인지 짐작하는 대신 접두사를 전부 아카이브에 물어보고, 실제로 무언가가 정의하는 가장 긴
+것을 취함. 아무것도 안 걸리면 어차피 어디에도 없는 심볼이므로 붙은 이름 그대로 보고함.
 
 ### 직접 빌드하기
 

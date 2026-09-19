@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.0 — 2026-09-19
+
+- Second tool: **Decode Link Error**. Paste or select linker output and it names the symbol
+  behind every `LNK2019` and `LNK2001`, then lists the libraries on this machine that define
+  it — with the architectures each one was found under, so a 32-bit/64-bit mismatch shows up
+  as a symbol that exists only under `x86`.
+- It reads the symbol index each static library carries in its first member, so nothing has
+  to be installed and a full search of MSVC and the Windows SDK takes about a second.
+- Decorated names are read straight out of the error, and a plain C name fused to its
+  calling function by a localized message is resolved by asking the archives where the name
+  ends.
+
+**한국어**
+
+- 두 번째 도구: **링크 에러 해독**. 링커 출력을 붙여넣거나 선택하면 `LNK2019`·`LNK2001` 마다
+  심볼 이름을 뽑고, 이 PC 에서 그 심볼을 정의하는 라이브러리를 알려 줌. 어느 아키텍처에서
+  나왔는지도 같이 보여 주므로 `x86` 에서만 나오면 32비트·64비트 불일치인 것이 드러남
+- 정적 라이브러리가 첫 멤버에 들고 있는 심볼 인덱스를 읽음. 그래서 설치할 것이 없고, MSVC 와
+  윈도우 SDK 를 전부 뒤지는 데 1초쯤 걸림
+- 맹글된 이름은 에러에서 바로 읽고, 번역된 메시지 때문에 호출 함수와 붙어 버린 C 심볼은 이름이
+  어디서 끝나는지를 아카이브에 물어 가름
+
 ## 0.1.1 — 2026-09-18
 
 - The extension now has its own icon in the Marketplace and the Extensions view.

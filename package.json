@@ -1,8 +1,8 @@
 {
   "name": "native-toolbelt",
   "displayName": "Native Toolbelt",
-  "description": "Tools for native development on Windows. Starting with: which DLLs an executable needs, and which of them this machine cannot find.",
-  "version": "0.1.1",
+  "description": "Tools for native development on Windows: which DLLs an executable needs and which of them this machine cannot find, and which library defines the symbol a link error could not resolve.",
+  "version": "0.2.0",
   "publisher": "Ruminem",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -18,7 +18,9 @@
     "dll",
     "pe",
     "dependencies",
-    "windows"
+    "windows",
+    "linker",
+    "lnk2019"
   ],
   "engines": {
     "vscode": "^1.80.0"
@@ -31,6 +33,10 @@
       {
         "command": "nativeToolbelt.checkDlls",
         "title": "%command.checkDlls%"
+      },
+      {
+        "command": "nativeToolbelt.decodeLinkError",
+        "title": "%command.decodeLinkError%"
       }
     ],
     "menus": {

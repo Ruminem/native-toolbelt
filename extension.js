@@ -4,6 +4,7 @@ const vscode = require('vscode');
 const path = require('path');
 const { readImports } = require('./pe');
 const { resolveImports } = require('./resolve');
+const { parseErrors, decode, libDirs, listLibs, groupLibs } = require('./linkerror');
 
 /** @param {vscode.OutputChannel} channel @param {string} file */
 function report(channel, file) {
@@ -26,6 +27,55 @@ function report(channel, file) {
   channel.appendLine(vscode.l10n.t('{0} imported, {1} missing', String(rows.length), String(missing.length)));
   channel.show(true);
   return missing;
+}
+
+/**
+ * Take a linker error and say which library defines the symbol it could not resolve.
+ * @param {vscode.OutputChannel} channel
+ */
+async function decodeLinkError(channel) {
+  const editor = vscode.window.activeTextEditor;
+  const selected = editor && !editor.selection.isEmpty ? editor.document.getText(editor.selection) : '';
+  // Link errors land in the terminal or the problems panel, neither of which is a document
+  // to select text in, so the clipboard is the entrance that both of them can reach.
+  const text = selected.trim() || (await vscode.env.clipboard.readText());
+  if (!parseErrors(text).length) {
+    vscode.window.showWarningMessage(
+      vscode.l10n.t('No LNK2019 or LNK2001 line in the selection or the clipboard.'));
+    return;
+  }
+
+  const workspaceLibs = await vscode.workspace.findFiles('**/*.{lib,a}', '**/node_modules/**');
+  const files = [...workspaceLibs.map((u) => u.fsPath), ...listLibs(libDirs())];
+
+  const rows = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Window, title: 'Native Toolbelt' },
+    (progress) => decode(text, files, (done, total) =>
+      progress.report({ message: vscode.l10n.t('{0} of {1} libraries', String(done), String(total)) }))
+  );
+
+  channel.clear();
+  for (const r of rows) {
+    channel.appendLine(`${r.code}  ${r.symbol}`);
+    const groups = groupLibs(r.libs);
+    if (!groups.length) {
+      channel.appendLine(`      ${vscode.l10n.t('in no library here — so it is missing from your own build')}`);
+    }
+    for (const g of groups) channel.appendLine(`      ${g.name}  (${g.where.join(', ')})`);
+    channel.appendLine('');
+  }
+  channel.appendLine(vscode.l10n.t('searched {0} libraries', String(files.length)));
+  channel.show(true);
+
+  const found = rows.filter((r) => r.libs.length);
+  if (found.length) {
+    vscode.window.showInformationMessage(
+      vscode.l10n.t('{0} of {1} symbols are in a library — link it.', String(found.length), String(rows.length)));
+  } else {
+    vscode.window.showWarningMessage(
+      vscode.l10n.t('None of the {0} symbols is in a library here, so each one is missing from your own build.',
+        String(rows.length)));
+  }
 }
 
 /** @param {vscode.ExtensionContext} context */
@@ -59,6 +109,13 @@ function activate(context) {
         }
       } catch (err) {
         vscode.window.showErrorMessage(vscode.l10n.t('Could not read {0}: {1}', path.basename(file), err.message));
+      }
+    }),
+    vscode.commands.registerCommand('nativeToolbelt.decodeLinkError', async () => {
+      try {
+        await decodeLinkError(channel);
+      } catch (err) {
+        vscode.window.showErrorMessage(vscode.l10n.t('Could not search the libraries: {0}', err.message));
       }
     })
   );
