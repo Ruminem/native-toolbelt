@@ -31,6 +31,7 @@ function report(channel, file) {
 
 /**
  * Take a linker error and say which library defines the symbol it could not resolve.
+ * Returns the rows it reported, so a test running inside the extension host can check them.
  * @param {vscode.OutputChannel} channel
  */
 async function decodeLinkError(channel) {
@@ -42,7 +43,7 @@ async function decodeLinkError(channel) {
   if (!parseErrors(text).length) {
     vscode.window.showWarningMessage(
       vscode.l10n.t('No LNK2019 or LNK2001 line in the selection or the clipboard.'));
-    return;
+    return [];
   }
 
   const workspaceLibs = await vscode.workspace.findFiles('**/*.{lib,a}', '**/node_modules/**');
@@ -76,6 +77,7 @@ async function decodeLinkError(channel) {
       vscode.l10n.t('None of the {0} symbols is in a library here, so each one is missing from your own build.',
         String(rows.length)));
   }
+  return rows;
 }
 
 /** @param {vscode.ExtensionContext} context */
@@ -94,7 +96,7 @@ function activate(context) {
         });
         file = picked?.[0]?.fsPath;
       }
-      if (!file) return;
+      if (!file) return [];
 
       try {
         const missing = report(channel, file);
@@ -107,15 +109,18 @@ function activate(context) {
         } else {
           vscode.window.showInformationMessage(vscode.l10n.t('{0}: every imported DLL was found.', name));
         }
+        return missing;
       } catch (err) {
         vscode.window.showErrorMessage(vscode.l10n.t('Could not read {0}: {1}', path.basename(file), err.message));
+        throw err;
       }
     }),
     vscode.commands.registerCommand('nativeToolbelt.decodeLinkError', async () => {
       try {
-        await decodeLinkError(channel);
+        return await decodeLinkError(channel);
       } catch (err) {
         vscode.window.showErrorMessage(vscode.l10n.t('Could not search the libraries: {0}', err.message));
+        throw err;
       }
     })
   );

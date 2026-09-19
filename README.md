@@ -82,6 +82,10 @@ npm test
 npm run package   # produces native-toolbelt-<version>.vsix
 ```
 
+`uitest.js` runs the commands inside a real extension host — activation, the clipboard,
+the workspace search — against your installed VS Code, with no test framework. Its header
+has the command line.
+
 ## License
 
 Apache-2.0
@@ -167,6 +171,10 @@ MS 는 LNK2019 를 잘 설명해 두었고 원인을 열여덟 가지나 적어 
 npm test
 npm run package   # native-toolbelt-<version>.vsix 생성
 ```
+
+`uitest.js` 는 명령을 실제 확장 호스트 안에서 돌려 봄 — 활성화, 클립보드, 워크스페이스
+검색까지. 이미 깔려 있는 VS Code 로 돌리고 테스트 틀은 안 씀. 실행 명령줄은 그 파일 맨 위
+주석에 있음.
 
 ### 라이선스
 
