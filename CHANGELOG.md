@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- **Decode Link Error** now reads GNU `ld` as well, so MinGW gcc builds are covered:
+  every `undefined reference to` line gives up its symbol and is answered with the
+  libraries that define it, exactly as an `LNK2019` is.
+- `ld` quotes the symbol, so its names are taken whole instead of being guessed at, and the
+  repeated lines it prints for one symbol — one per reference — are folded into one answer.
+- A C++ name that `ld` demangled cannot be found in any archive index, which holds the
+  mangled form. That is now said as such, with the `-Wl,--no-demangle` flag that prints the
+  name an index can match, rather than reported as a symbol that exists nowhere.
+
+**한국어**
+
+- **링크 에러 해독** 이 GNU `ld` 도 읽어서 MinGW gcc 빌드까지 다룸. `undefined reference to`
+  줄마다 심볼을 뽑고 그것을 정의하는 라이브러리를 알려 줌 — `LNK2019` 와 똑같이 답함
+- `ld` 는 심볼을 따옴표로 감싸므로 이름을 짐작하지 않고 통째로 가져옴. 한 심볼에 참조마다 한 줄씩
+  여러 번 찍는 것은 한 답으로 접음
+- `ld` 가 demangle 한 C++ 이름은 맹글된 이름을 들고 있는 아카이브 인덱스에서 절대 안 걸림.
+  이제 그것을 어디에도 없는 심볼이라고 하지 않고, 인덱스가 맞춰 볼 수 있는 이름으로 찍게 하는
+  `-Wl,--no-demangle` 과 함께 그렇다고 말해 줌
+
 ## 0.2.0 — 2026-09-19
 
 - Second tool: **Decode Link Error**. Paste or select linker output and it names the symbol

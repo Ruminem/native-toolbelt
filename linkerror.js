@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
- * Reading an MSVC link error and finding which library defines the symbol it names.
+ * Reading a link error and finding which library defines the symbol it names.
+ *
+ * Two linkers say it two ways. MSVC writes LNK2019 and leaves the symbol wherever the
+ * translated wording puts it; GNU ld — the one behind MinGW gcc — writes "undefined
+ * reference to" and quotes the symbol, so its names come out whole.
  *
  * MS documents what LNK2019 means and lists eighteen ways to cause it, but the one thing
  * the docs cannot know is what is installed here. Their own advice is to run dumpbin over
@@ -29,15 +33,36 @@ const TOKEN = /[A-Za-z_$@?][A-Za-z0-9_$@?.]*/g;
 // an English one stops offering "unresolved" as a candidate longer than a short C symbol.
 const STOPWORDS = new Set(['unresolved', 'external', 'symbol', 'symbols', 'referenced', 'function', 'fatal', 'error']);
 
+// GNU ld wraps the symbol in a backtick and an apostrophe, so there is nothing to guess
+// about where the name ends. What comes before it is the object, the source line and the
+// section offset, and with -g ld puts the object and the enclosing function on a line of
+// their own above this one — that line carries no symbol, so nothing here reads it.
+const LD_LINE = /undefined reference to `([^']+)'/;
+// A name the archive index could hold. ld demangles C++ names unless it is told not to,
+// and "missing_too()" or "vtable for T" is not what an index holds; an identifier is.
+const IDENTIFIER = /^[A-Za-z_$@?][A-Za-z0-9_$@?.]*$/;
+
 /**
+ * `decorated` is every name the line states exactly — an MSVC decorated name, or whatever
+ * ld quoted. `tokens` is what is left to guess from when it states none.
  * @param {string} text linker output, in any UI language
  * @returns {{code: string, line: string, decorated: string[], tokens: string[]}[]}
  */
 function parseErrors(text) {
   const out = [];
+  // ld reports one line per reference, not per symbol: a symbol used three times comes
+  // back three times, and the library that defines it is the same answer all three.
+  const seen = new Set();
   for (const raw of text.split(/\r?\n/)) {
     const m = ERROR_LINE.exec(raw);
-    if (!m) continue;
+    if (!m) {
+      const ld = LD_LINE.exec(raw);
+      if (ld && !seen.has(ld[1])) {
+        seen.add(ld[1]);
+        out.push({ code: 'ld', line: raw.trim(), decorated: [ld[1]], tokens: [] });
+      }
+      continue;
+    }
     // Everything before the code is the object or library that referenced the symbol, and
     // its file name would otherwise look exactly like a symbol to the token pass.
     const rest = raw.slice(m.index + m[0].length);
@@ -51,6 +76,18 @@ function parseErrors(text) {
     out.push({ code: `LNK${m[1]}`, line: raw.trim(), decorated, tokens });
   }
   return out;
+}
+
+/**
+ * Whether a symbol came out of ld's demangler, which makes it unfindable: the index holds
+ * `_Z11missing_toov`, the message says `missing_too()`, and no amount of searching turns
+ * one into the other. Relinking with -Wl,--no-demangle prints the name the index holds.
+ * Reported rather than repaired — demangling is one-way, and undoing it means carrying the
+ * whole Itanium mangling grammar to answer a question the linker can answer for free.
+ * @param {string} symbol @returns {boolean}
+ */
+function isDemangled(symbol) {
+  return !IDENTIFIER.test(symbol);
 }
 
 /** @param {string[]} tokens @returns {string|null} */
@@ -232,4 +269,4 @@ function groupLibs(libs) {
   return [...byName.values()];
 }
 
-module.exports = { parseErrors, candidates, scan, decode, libDirs, listLibs, groupLibs };
+module.exports = { parseErrors, isDemangled, candidates, scan, decode, libDirs, listLibs, groupLibs };

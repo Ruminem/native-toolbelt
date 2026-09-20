@@ -59,6 +59,28 @@ of a 600 MB SDK instead of starting `dumpbin` fifteen hundred times — under a 
 The architectures are part of the answer: a symbol found only under `x86` is the
 32-bit/64-bit mismatch that the error message itself never mentions.
 
+### MinGW: `undefined reference to`
+
+GNU `ld` — the linker behind MinGW gcc — is read as well. It wraps the symbol in quotes, so
+its names come out whole and none of the guessing below is needed:
+
+```
+ld  __imp_WSAStartup
+      libws2_32.a  (lib)
+
+ld  plain_c_function
+      in no library here — so it is missing from your own build
+```
+
+`ld` prints one line per *reference* rather than per symbol, so a function called three
+times is folded back into one answer. The one thing it does that MSVC does not is demangle
+C++ names before printing them: an index holds `_Z11missing_toov`, the message says
+`missing_too()`, and no search turns one into the other — so such a name is reported as
+unfindable, together with the flag that prints it raw, `-Wl,--no-demangle`.
+
+The libraries searched are the ones in your workspace plus the MSVC and Windows SDK
+directories. A MinGW installation's own `lib` folder is not found on its own yet.
+
 ### Why not just read the docs
 
 MS documents LNK2019 well and lists eighteen ways to cause it. What no document can list is
@@ -149,6 +171,28 @@ LNK2019  CreateFileW
 
 아키텍처도 답의 일부임. `x86` 아래에서만 나온 심볼은 에러 메시지가 한마디도 안 하는 32비트·
 64비트 불일치임.
+
+### MinGW 의 `undefined reference to`
+
+MinGW gcc 뒤에 있는 GNU `ld` 도 같이 읽음. `ld` 는 심볼을 따옴표로 감싸 찍으므로 이름이 통째로
+나오고, 아래의 더듬기가 아예 필요 없음.
+
+```
+ld  __imp_WSAStartup
+      libws2_32.a  (lib)
+
+ld  plain_c_function
+      이 PC 의 어느 라이브러리에도 없음 — 내 빌드에서 빠진 것임
+```
+
+`ld` 는 심볼마다가 아니라 *참조마다* 한 줄을 찍으므로, 세 번 부른 함수는 한 답으로 접어서 보여
+줌. MSVC 와 다른 점 하나는 C++ 이름을 demangle 해서 찍는다는 것임 — 인덱스에 있는 것은
+`_Z11missing_toov` 인데 메시지는 `missing_too()` 라 적고, 어떤 검색으로도 한쪽이 다른 쪽이 되지
+않음. 그래서 그런 이름은 못 찾는다고 말하고 날것으로 찍게 하는 플래그 `-Wl,--no-demangle` 을
+같이 알려 줌.
+
+뒤지는 라이브러리는 워크스페이스 안의 것과 MSVC·윈도우 SDK 폴더임. MinGW 설치본의 `lib` 폴더는
+아직 스스로 찾지 못함.
 
 ### 문서를 읽으면 되지 않나
 

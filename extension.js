@@ -4,7 +4,7 @@ const vscode = require('vscode');
 const path = require('path');
 const { readImports } = require('./pe');
 const { resolveImports } = require('./resolve');
-const { parseErrors, decode, libDirs, listLibs, groupLibs } = require('./linkerror');
+const { parseErrors, isDemangled, decode, libDirs, listLibs, groupLibs } = require('./linkerror');
 
 /** @param {vscode.OutputChannel} channel @param {string} file */
 function report(channel, file) {
@@ -42,7 +42,7 @@ async function decodeLinkError(channel) {
   const text = selected.trim() || (await vscode.env.clipboard.readText());
   if (!parseErrors(text).length) {
     vscode.window.showWarningMessage(
-      vscode.l10n.t('No LNK2019 or LNK2001 line in the selection or the clipboard.'));
+      vscode.l10n.t('No LNK2019, LNK2001 or "undefined reference to" line in the selection or the clipboard.'));
     return [];
   }
 
@@ -60,7 +60,11 @@ async function decodeLinkError(channel) {
     channel.appendLine(`${r.code}  ${r.symbol}`);
     const groups = groupLibs(r.libs);
     if (!groups.length) {
-      channel.appendLine(`      ${vscode.l10n.t('in no library here — so it is missing from your own build')}`);
+      // A demangled C++ name never matches an index, so "nowhere" would be an answer about
+      // the name rather than about the symbol. Say which it is.
+      channel.appendLine(`      ${isDemangled(r.symbol)
+        ? vscode.l10n.t('ld printed this name demangled — relink with -Wl,--no-demangle to look it up')
+        : vscode.l10n.t('in no library here — so it is missing from your own build')}`);
     }
     for (const g of groups) channel.appendLine(`      ${g.name}  (${g.where.join(', ')})`);
     channel.appendLine('');
@@ -72,6 +76,9 @@ async function decodeLinkError(channel) {
   if (found.length) {
     vscode.window.showInformationMessage(
       vscode.l10n.t('{0} of {1} symbols are in a library — link it.', String(found.length), String(rows.length)));
+  } else if (rows.some((r) => isDemangled(r.symbol))) {
+    vscode.window.showWarningMessage(
+      vscode.l10n.t('ld demangled these C++ names, so no index can match them — relink with -Wl,--no-demangle.'));
   } else {
     vscode.window.showWarningMessage(
       vscode.l10n.t('None of the {0} symbols is in a library here, so each one is missing from your own build.',

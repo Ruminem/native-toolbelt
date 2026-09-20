@@ -20,7 +20,9 @@
     "dependencies",
     "windows",
     "linker",
-    "lnk2019"
+    "lnk2019",
+    "mingw",
+    "undefined-reference"
   ],
   "engines": {
     "vscode": "^1.80.0"
