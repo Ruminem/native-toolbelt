@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
- * Reading an MSVC link error and finding which library defines the symbol it names.
+ * Reading a link error and finding which library defines the symbol it names.
  *
  * MS documents what LNK2019 means and lists eighteen ways to cause it, but the one thing
  * the docs cannot know is what is installed here. Their own advice is to run dumpbin over
  * your libraries by hand. That is what this does, except it reads the symbol indexes
  * directly, so the answer takes under a second instead of 1,500 processes.
+ *
+ * GNU ld and lld ask the same question in the other direction. MSVC prints the decorated
+ * name and leaves the reading to you; they demangle and leave the lookup to you, since
+ * `ns::deep(double)` matches nothing in an index full of `_ZN2ns4deepEd`. mangle.js rebuilds
+ * the front of the mangled name, so the lookup becomes a prefix match over the same scan.
  *
  * Nothing here imports vscode, so the parsing is testable without an editor.
  */
@@ -13,6 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const { readSymbolNames } = require('./ar');
+const { manglePrefix } = require('./mangle');
 
 // Shorter than this and a word out of a message is as likely a match as a real symbol.
 // Symbols this short exist; they are not worth what they drag in.
@@ -21,6 +27,11 @@ const MIN_TOKEN = 4;
 // The error code is the only part of a linker message that reads the same in every UI
 // language, so the whole parse hangs off it rather than off any wording around it.
 const ERROR_LINE = /\berror\s+LNK(2019|2001)\b/;
+// GNU ld fences the name in a backtick and a quote, which is what makes this parse exact
+// where the MSVC one has to guess at a seam: `undefined reference to `ns::deep(double)''.
+const GNU_REFERENCE = /undefined reference to `([^']+)'/;
+// lld runs the name to the end of the line instead: "ld.lld: error: undefined symbol: main".
+const LLD_SYMBOL = /undefined symbol:\s*(\S.*?)\s*$/;
 // MSVC decorated names begin with '?', and the linker prints them in parentheses.
 const DECORATED = /\((\?[^)]+)\)/g;
 const TOKEN = /[A-Za-z_$@?][A-Za-z0-9_$@?.]*/g;
@@ -31,11 +42,18 @@ const STOPWORDS = new Set(['unresolved', 'external', 'symbol', 'symbols', 'refer
 
 /**
  * @param {string} text linker output, in any UI language
- * @returns {{code: string, line: string, decorated: string[], tokens: string[]}[]}
+ * @returns {{code: string, line: string, decorated: string[], tokens: string[], gnu?: string}[]}
+ *   `gnu` holds the name as GNU ld or lld demangled it, on the lines that carry one.
  */
 function parseErrors(text) {
   const out = [];
   for (const raw of text.split(/\r?\n/)) {
+    // A GNU line names the symbol outright, so it needs none of the token guessing below.
+    const g = GNU_REFERENCE.exec(raw) || LLD_SYMBOL.exec(raw);
+    if (g) {
+      out.push({ code: 'ld', line: raw.trim(), decorated: [], tokens: [], gnu: g[1].trim() });
+      continue;
+    }
     const m = ERROR_LINE.exec(raw);
     if (!m) continue;
     // Everything before the code is the object or library that referenced the symbol, and
@@ -74,25 +92,83 @@ function longest(tokens) {
  * index of 450,000 symbols an ordinary word finds something. "main" is defined in clang's
  * fuzzer libraries, so looking up every word answered a missing function with a library
  * that had nothing to do with it, which is worse than not answering.
+ * A GNU line needs none of that — the name is fenced in quotes — but it needs the opposite
+ * favour undone. `ns::deep(double)` is in no index; `_ZN2ns4deepE` is the front of the one
+ * that is, so it goes in as a prefix rather than a name. `comps` carries the same name as
+ * its parts in order, for the mangled names whose front cannot be rebuilt: a template class
+ * writes its arguments into the middle of its own name, so the parts are all still there
+ * with other things between them.
  * @param {ReturnType<typeof parseErrors>} errors
- * @returns {Set<string>}
+ * @returns {{exact: Set<string>, prefixes: string[], comps: string[][]}}
  */
 function candidates(errors) {
-  const wanted = new Set();
+  const exact = new Set();
+  const prefixes = new Set();
+  const comps = new Map();
   for (const e of errors) {
+    if (e.gnu) {
+      const m = manglePrefix(e.gnu);
+      if (!m) continue;
+      if (m.plain) exact.add(m.plain);
+      else {
+        prefixes.add(m.prefix);
+        comps.set(m.comps.join('\u0000'), m.comps);
+      }
+      continue;
+    }
     if (e.decorated.length) {
-      for (const s of e.decorated) wanted.add(s);
+      for (const s of e.decorated) exact.add(s);
       continue;
     }
     const t = e.tokens[0];
-    if (t) for (let n = MIN_TOKEN; n <= t.length; n++) wanted.add(t.slice(0, n));
+    if (t) for (let n = MIN_TOKEN; n <= t.length; n++) exact.add(t.slice(0, n));
   }
-  return wanted;
+  return { exact, prefixes: [...prefixes], comps: [...comps.values()] };
+}
+
+/** @param {ReturnType<typeof candidates>} w */
+function isEmpty(w) {
+  return !w.exact.size && !w.prefixes.length && !w.comps.length;
+}
+
+/**
+ * Whether every component appears in the mangled name, in order. This is what a prefix
+ * match degrades into once a template argument lands in the middle of a name:
+ * `_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE6appendEPKc` still spells
+ * `12basic_string` and then `6append`, with the argument list between them.
+ * @param {string} mangled @param {string[]} comps
+ */
+function hasComponents(mangled, comps) {
+  let i = 0;
+  for (const c of comps) {
+    i = mangled.indexOf(c, i);
+    if (i < 0) return false;
+    i += c.length;
+  }
+  return true;
+}
+
+/**
+ * What the scan collects, which is deliberately looser than what decode will accept: a
+ * name starting with `_ZN2ns4deepE` contains those components in order by construction, so
+ * the component test alone gathers everything the prefix test would, and the prefix belongs
+ * in the judging rather than here.
+ *
+ * Only mangled names are worth walking the components for, and every mangled name begins
+ * `_Z`. In an index of 450,000 symbols that test rejects nearly all of them before a single
+ * string comparison runs.
+ * @param {string} n @param {ReturnType<typeof candidates>} w
+ */
+function matches(n, w) {
+  if (w.exact.has(n)) return true;
+  if (n.charCodeAt(0) !== 0x5f || n.charCodeAt(1) !== 0x5a) return false; // '_Z'
+  for (const c of w.comps) if (hasComponents(n, c)) return true;
+  return false;
 }
 
 /**
  * @param {string[]} files archives to look in
- * @param {Set<string>} wanted
+ * @param {ReturnType<typeof candidates>} wanted
  * @param {(done: number, total: number) => void} [onProgress] called as the scan advances
  * @returns {Promise<Map<string, string[]>>} symbol -> archives defining it
  */
@@ -106,7 +182,7 @@ async function scan(files, wanted, onProgress) {
       continue; // a stray file that is not an archive is not worth failing the scan over
     }
     for (const n of names) {
-      if (!wanted.has(n)) continue;
+      if (!matches(n, wanted)) continue;
       if (!hits.has(n)) hits.set(n, []);
       hits.get(n).push(files[i]);
     }
@@ -130,10 +206,36 @@ async function scan(files, wanted, onProgress) {
 async function decode(text, files, onProgress) {
   const errors = parseErrors(text);
   const wanted = candidates(errors);
-  const hits = wanted.size ? await scan(files, wanted, onProgress) : new Map();
+  const hits = isEmpty(wanted) ? new Map() : await scan(files, wanted, onProgress);
 
   return errors.map((e) => {
     const base = { code: e.code, line: e.line };
+    // The name GNU printed is the readable one, and it stays the one reported: nobody
+    // searching their code for the problem is looking for `_ZN2ns4deepEd`.
+    if (e.gnu) {
+      const m = manglePrefix(e.gnu);
+      // An operator, whose mangled form spells no name at all. Reporting it as absent would
+      // be reporting a conclusion this never reached.
+      if (!m) return { ...base, symbol: e.gnu, libs: [], unknown: true };
+      if (m.plain) return { ...base, symbol: m.plain, libs: hits.get(m.plain) || [] };
+
+      // Every overload shares the prefix, and any of them is a reason to link the library.
+      const libs = new Set();
+      for (const [name, where] of hits) {
+        if (name.startsWith(m.prefix)) for (const w of where) libs.add(w);
+      }
+      // Only when the rebuilt front matched nothing is the looser test worth its false
+      // positives — otherwise a name that merely contains the same components, in another
+      // namespace, would join a real answer. Measured over libstdc++'s 7,204 mangled
+      // symbols: the prefix places 37.8% exactly, components place another 46.8%, and those
+      // drag in 20.7 unrelated symbols each, which is why they only run as a fallback.
+      if (!libs.size) {
+        for (const [name, where] of hits) {
+          if (hasComponents(name, m.comps)) for (const w of where) libs.add(w);
+        }
+      }
+      return { ...base, symbol: e.gnu, libs: [...libs] };
+    }
     if (e.decorated.length) {
       const name = e.decorated[0];
       return { ...base, symbol: name, libs: hits.get(name) || [] };
@@ -195,12 +297,73 @@ function libDirs() {
   return dirs;
 }
 
-/** @param {string[]} dirs @returns {string[]} the archives directly inside them */
+// The programs that mean "a GNU-style toolchain lives one folder up from here". Looking
+// for the driver rather than for a folder called mingw64 is what makes this work for
+// WinLibs, MSYS2, a Chocolatey install and a linux container alike: none of them agree on
+// the name of the root, and all of them put the driver on PATH.
+const GNU_DRIVERS = ['gcc', 'g++', 'clang', 'ld'];
+
+/** @returns {string[]} the folders holding a GNU toolchain's bin directory */
+function toolchainRoots() {
+  const roots = new Set();
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (!dir) continue;
+    if (GNU_DRIVERS.some((d) => fs.existsSync(path.join(dir, d + ext)))) roots.add(path.dirname(dir));
+  }
+  return [...roots];
+}
+
+/**
+ * Where a GNU toolchain keeps its archives. MSVC has one layout and the SDK has another,
+ * both fixed; a MinGW install has three places that matter and no promise about the name
+ * of the root:
+ *
+ *   <root>/lib                              libstdc++.a and friends
+ *   <root>/lib/gcc/<target>/<version>       libgcc.a
+ *   <root>/<target>/lib                     libkernel32.a — the Win32 import libraries
+ *
+ * Asking the driver with `gcc -print-search-dirs` would be exact, but starting a process
+ * to find out where files are is the thing this extension exists not to do. The layout is
+ * stable across every distribution of it, and listLibs only reads what is directly inside,
+ * so a folder guessed wrong costs one failed readdir.
+ * @returns {string[]}
+ */
+function gnuLibDirs() {
+  const dirs = new Set();
+  for (const root of toolchainRoots()) {
+    for (const name of ['lib', 'lib64']) {
+      const lib = path.join(root, name);
+      dirs.add(lib);
+      // lib/x86_64-linux-gnu and the like, where a multiarch system files its archives.
+      for (const d of subdirs(lib)) dirs.add(d);
+    }
+    // <target>/lib for MinGW, and harmlessly <root>/share/lib and the like elsewhere.
+    for (const d of subdirs(root)) dirs.add(path.join(d, 'lib'));
+    for (const target of subdirs(path.join(root, 'lib', 'gcc'))) {
+      for (const version of subdirs(target)) dirs.add(version);
+    }
+  }
+  return [...dirs];
+}
+
+/**
+ * The archives directly inside these folders, each one only once. Folders are compared by
+ * their real path because the same one arrives twice otherwise: a PATH carrying both
+ * /usr/bin and /bin finds two toolchain roots that are the same files, and every library
+ * under them would be read twice and reported as if found in two places.
+ * @param {string[]} dirs @returns {string[]}
+ */
 function listLibs(dirs) {
   const out = [];
+  const seen = new Set();
   for (const d of dirs) {
     let entries;
+    let real;
     try {
+      real = fs.realpathSync(d);
+      if (seen.has(real)) continue;
+      seen.add(real);
       entries = fs.readdirSync(d, { withFileTypes: true });
     } catch {
       continue;
@@ -226,10 +389,13 @@ function groupLibs(libs) {
   for (const f of libs) {
     const name = path.win32.basename(f);
     const key = name.toLowerCase();
-    if (!byName.has(key)) byName.set(key, { name, where: [] });
-    byName.get(key).where.push(path.win32.basename(path.win32.dirname(f)));
+    if (!byName.has(key)) byName.set(key, { name, where: new Set() });
+    byName.get(key).where.add(path.win32.basename(path.win32.dirname(f)));
   }
-  return [...byName.values()];
+  // A folder name says something only when it differs: MSVC files the same library under
+  // x64 and x86, but a MinGW install has three folders all called lib, and "(lib, lib, lib)"
+  // is noise where "(x64, x86)" is the answer.
+  return [...byName.values()].map((g) => ({ name: g.name, where: [...g.where] }));
 }
 
-module.exports = { parseErrors, candidates, scan, decode, libDirs, listLibs, groupLibs };
+module.exports = { parseErrors, candidates, scan, decode, libDirs, gnuLibDirs, listLibs, groupLibs };

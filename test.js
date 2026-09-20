@@ -6,7 +6,8 @@ const path = require('path');
 const { readImports } = require('./pe');
 const { resolveImports } = require('./resolve');
 const { readSymbolNames } = require('./ar');
-const { parseErrors, decode, libDirs, listLibs, groupLibs } = require('./linkerror');
+const { manglePrefix } = require('./mangle');
+const { parseErrors, decode, libDirs, gnuLibDirs, listLibs, groupLibs } = require('./linkerror');
 
 // Windows ships these, so the test has a real 64-bit and a real 32-bit binary to read.
 const root = process.env.SystemRoot || 'C:\\Windows';
@@ -81,12 +82,92 @@ assert.deepStrictEqual(
     'C:\\Kits\\10\\Lib\\10.0\\um\\x64\\kernel32.Lib',
     'C:\\Kits\\10\\Lib\\10.0\\um\\x86\\kernel32.lib',
     'C:\\Kits\\10\\Lib\\10.0\\um\\x64\\mincore.lib',
+    // A MinGW install files the same library under several folders all called lib, and
+    // repeating the name says nothing the first one did not.
+    'C:\\mingw64\\x86_64-w64-mingw32\\lib\\mincore.lib',
   ]),
   [
     { name: 'kernel32.Lib', where: ['x64', 'x86'] },
-    { name: 'mincore.lib', where: ['x64'] },
+    { name: 'mincore.lib', where: ['x64', 'lib'] },
   ]
 );
+// The same folder name twice says nothing the first one did not: a MinGW install has
+// several folders called lib, and "(lib, lib, lib)" is noise where "(x64, x86)" is an answer.
+assert.deepStrictEqual(
+  groupLibs([
+    'C:\\mingw64\\x86_64-w64-mingw32\\lib\\libmincore.a',
+    'C:\\mingw64\\lib\\libmincore.a',
+  ]),
+  [{ name: 'libmincore.a', where: ['lib'] }]
+);
+
+// Real output, captured from gcc 13 and lld 18 on a link that failed on purpose. GNU ld
+// fences the name between a backtick and a quote; lld runs it to the end of the line. Both
+// demangle, which is the whole difficulty: the archive index holds `_ZN2ns4deepEd`.
+const GNU = [
+  "/usr/bin/ld: /tmp/ccMu5ymE.o: in function `main':",
+  "mangle.cpp:(.text+0x22): undefined reference to `other(int)'",
+  "/usr/bin/ld: mangle.cpp:(.text+0x48): undefined reference to `ns::deep(double)'",
+  "/usr/bin/ld: mangle.cpp:(.text+0x7a): undefined reference to `K::cmethod(int) const'",
+  "/usr/bin/ld: mangle.cpp:(.text+0x9e): undefined reference to `c_linkage'",
+  "/usr/bin/ld: mangle.cpp:(.text+0xb0): undefined reference to `never_defined(float)'",
+  'collect2: error: ld returned 1 exit status',
+].join('\n');
+
+const LLD = [
+  'ld.lld: error: undefined symbol: ns::deep(double)',
+  '>>> referenced by mangle.cpp',
+  '>>>               /tmp/mangle-be3e72.o:(main)',
+].join('\n');
+
+const gnuErrors = parseErrors(GNU);
+// Five names, and neither the "in function" line nor collect2's summary is one of them.
+assert.deepStrictEqual(gnuErrors.map((e) => e.gnu), [
+  'other(int)', 'ns::deep(double)', 'K::cmethod(int) const', 'c_linkage', 'never_defined(float)',
+]);
+assert.ok(gnuErrors.every((e) => e.code === 'ld'));
+
+const lldErrors = parseErrors(LLD);
+// The ">>>" lines carry the file that referenced it, and must not read as symbols.
+assert.deepStrictEqual(lldErrors.map((e) => e.gnu), ['ns::deep(double)']);
+
+// The mangled prefixes, checked against what `nm` actually reports for each of these.
+// Anything after the prefix is a parameter list spelled for a reader, which is exactly the
+// part that cannot be mangled back — and exactly the part a prefix match does not need.
+assert.deepStrictEqual(manglePrefix('other(int)'), { prefix: '_Z5other', comps: ['5other'] });
+assert.deepStrictEqual(manglePrefix('ns::deep(double)'), { prefix: '_ZN2ns4deepE', comps: ['2ns', '4deep'] });
+assert.deepStrictEqual(manglePrefix('a::b::nested(char)'),
+  { prefix: '_ZN1a1b6nestedE', comps: ['1a', '1b', '6nested'] });
+// const belongs to the front of a mangled name, not the back: _ZNK, never _ZN.
+assert.deepStrictEqual(manglePrefix('K::cmethod(int) const'),
+  { prefix: '_ZNK1K7cmethodE', comps: ['1K', '7cmethod'] });
+assert.deepStrictEqual(manglePrefix('K::method(int)'), { prefix: '_ZN1K6methodE', comps: ['1K', '6method'] });
+// A demangled template function shows a return type, because the mangling encodes one.
+assert.deepStrictEqual(manglePrefix('int tmpl<int>(int)'), { prefix: '_Z4tmpl', comps: ['4tmpl'] });
+assert.deepStrictEqual(manglePrefix('noargs()'), { prefix: '_Z6noargs', comps: ['6noargs'] });
+assert.deepStrictEqual(manglePrefix('refarg(int const&, char*)'), { prefix: '_Z6refarg', comps: ['6refarg'] });
+// No parameter list and no qualification: a C name, which archives hold verbatim.
+assert.deepStrictEqual(manglePrefix('c_linkage'), { plain: 'c_linkage' });
+
+// std is never spelled out. Checked against this machine's libstdc++.a, where 3,819 of
+// 7,357 symbols begin _ZSt or _ZNSt and not one begins _ZN3std.
+assert.deepStrictEqual(manglePrefix('std::__throw_length_error(char const*)'),
+  { prefix: '_ZSt20__throw_length_error', comps: ['20__throw_length_error'] });
+// A variable has no parameter list either, and is still mangled: std::cout is _ZSt4cout.
+assert.deepStrictEqual(manglePrefix('std::cout'), { prefix: '_ZSt4cout', comps: ['4cout'] });
+// A destructor keeps no name at all — ~bad_alloc() is D0Ev, D1Ev or D2Ev depending on what
+// the compiler emitted — so the prefix stops at the class and does not close with E.
+assert.deepStrictEqual(manglePrefix('std::bad_alloc::~bad_alloc()'),
+  { prefix: '_ZNSt9bad_alloc', comps: ['9bad_alloc'] });
+assert.ok('_ZNSt9bad_allocD2Ev'.startsWith(manglePrefix('std::bad_alloc::~bad_alloc()').prefix));
+// A template class writes its arguments into the middle of its own name, so the prefix
+// breaks and the components in order are what still find it.
+const append = manglePrefix('std::__cxx11::basic_string<char, std::char_traits<char>, '
+  + 'std::allocator<char> >::append(char const*)');
+assert.deepStrictEqual(append.comps, ['7__cxx11', '12basic_string', '6append']);
+// An operator's mangled form spells no name, so the honest answer is no answer.
+assert.strictEqual(manglePrefix('operator delete(void*)'), null);
+assert.strictEqual(manglePrefix('MyType::operator==(MyType const&) const'), null);
 
 // Every translated string must exist in every translation, or a Korean window falls back to English.
 const read = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
@@ -108,9 +189,61 @@ assert.deepStrictEqual(Object.keys(koBundle).sort(), [...new Set(used)].sort());
 
 // The lookup needs a real archive, so it only runs where MSVC and the SDK are installed.
 async function main() {
+  // A real archive, built by GNU ar from the four definitions these errors are missing.
+  // It rides in the repository because the point of it is to run everywhere — the MSVC
+  // half below can only run on a machine with the SDK, and this half must not inherit that.
+  const fixture = path.join(__dirname, 'test-gnu.a');
+  assert.deepStrictEqual(
+    readSymbolNames(fixture).sort(),
+    ['_Z5otheri', '_ZN2ns4deepEd', '_ZNK1K7cmethodEi', 'c_linkage'].sort(),
+    'the GNU fixture is not the archive these assertions were written against'
+  );
+
+  const gnuRows = await decode(GNU, [fixture]);
+  // The reported name stays the readable one: nobody greps their code for _ZN2ns4deepEd.
+  assert.deepStrictEqual(gnuRows.map((r) => r.symbol), [
+    'other(int)', 'ns::deep(double)', 'K::cmethod(int) const', 'c_linkage', 'never_defined(float)',
+  ]);
+  assert.deepStrictEqual(gnuRows[0].libs, [fixture], 'a free function was not matched');
+  assert.deepStrictEqual(gnuRows[1].libs, [fixture], 'a namespaced function was not matched');
+  assert.deepStrictEqual(gnuRows[2].libs, [fixture], 'a const member was not matched — _ZNK?');
+  assert.deepStrictEqual(gnuRows[3].libs, [fixture], 'a C name was not matched');
+  // Nothing defines it, and a prefix match must not invent an answer out of a near miss.
+  assert.deepStrictEqual(gnuRows[4].libs, [], 'a symbol nothing defines came back with a library');
+
+  // The second fixture holds the two ways a lookup for ns::deep(double) can go wrong.
+  // other::deep shares the `4deep` component and nothing else. ns::inner::deep is the
+  // harder one: its components contain `2ns` and then `4deep` in order, so the loose test
+  // accepts it and only the prefix rejects it. Without that symbol the prefix match could
+  // be deleted outright and every assertion here would still pass.
+  const decoy = path.join(__dirname, 'test-gnu-decoy.a');
+  assert.deepStrictEqual(readSymbolNames(decoy), ['_ZN5other4deepEd', '_ZN2ns5inner4deepEd']);
+  const bothRows = await decode(GNU, [fixture, decoy]);
+  assert.deepStrictEqual(bothRows[1].symbol, 'ns::deep(double)');
+  assert.deepStrictEqual(bothRows[1].libs, [fixture],
+    'a function of the same name in another namespace was dragged in — is the prefix match still there?');
+
+  const lldRows = await decode(LLD, [fixture]);
+  assert.deepStrictEqual(lldRows.map((r) => r.symbol), ['ns::deep(double)']);
+  assert.deepStrictEqual(lldRows[0].libs, [fixture]);
+
+  // An operator reports as unanswerable rather than as absent: "in no library here" would
+  // send someone to look at their own build over a question that was never asked.
+  const opRows = await decode(
+    "/usr/bin/ld: main.cpp:(.text+0x1): undefined reference to `operator delete(void*)'", [fixture]);
+  assert.strictEqual(opRows.length, 1);
+  assert.strictEqual(opRows[0].unknown, true);
+  assert.deepStrictEqual(opRows[0].libs, []);
+  // An ordinary missing symbol is absent, not unanswerable, and must not claim otherwise.
+  assert.strictEqual(gnuRows[4].unknown, undefined);
+
+  // Where the toolchain sits differs on every machine, so what is under test is that
+  // looking for it reads folders rather than throwing on the ones that are not there.
+  assert.ok(Array.isArray(gnuLibDirs()));
+
   const kernel32 = listLibs(libDirs()).find((f) => /[\\/]um[\\/]x64[\\/]kernel32\.lib$/i.test(f));
   if (!kernel32) {
-    console.log('ok (MSVC·SDK 가 없어 아카이브 검사는 건너뜀)');
+    console.log('ok (MSVC·SDK 가 없어 그쪽 아카이브 검사만 건너뜀)');
     return;
   }
 

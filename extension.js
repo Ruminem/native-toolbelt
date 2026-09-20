@@ -4,7 +4,7 @@ const vscode = require('vscode');
 const path = require('path');
 const { readImports } = require('./pe');
 const { resolveImports } = require('./resolve');
-const { parseErrors, decode, libDirs, listLibs, groupLibs } = require('./linkerror');
+const { parseErrors, decode, libDirs, gnuLibDirs, listLibs, groupLibs } = require('./linkerror');
 
 /** @param {vscode.OutputChannel} channel @param {string} file */
 function report(channel, file) {
@@ -42,12 +42,16 @@ async function decodeLinkError(channel) {
   const text = selected.trim() || (await vscode.env.clipboard.readText());
   if (!parseErrors(text).length) {
     vscode.window.showWarningMessage(
-      vscode.l10n.t('No LNK2019 or LNK2001 line in the selection or the clipboard.'));
+      vscode.l10n.t('No link error in the selection or the clipboard.'));
     return [];
   }
 
   const workspaceLibs = await vscode.workspace.findFiles('**/*.{lib,a}', '**/node_modules/**');
-  const files = [...workspaceLibs.map((u) => u.fsPath), ...listLibs(libDirs())];
+  // Both toolchains are searched whichever error was pasted. Which compiler produced the
+  // message does not narrow where the symbol lives: a MinGW build links MSVC-built .lib
+  // files and a MSVC one links a .a from a vcpkg port, and an archive that cannot answer
+  // costs one read of its index.
+  const files = [...workspaceLibs.map((u) => u.fsPath), ...listLibs([...libDirs(), ...gnuLibDirs()])];
 
   const rows = await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Window, title: 'Native Toolbelt' },
@@ -59,7 +63,11 @@ async function decodeLinkError(channel) {
   for (const r of rows) {
     channel.appendLine(`${r.code}  ${r.symbol}`);
     const groups = groupLibs(r.libs);
-    if (!groups.length) {
+    // Absent and unanswerable are different answers, and only one of them tells you to go
+    // look at your own build.
+    if (r.unknown) {
+      channel.appendLine(`      ${vscode.l10n.t('an operator — a mangled name spells none, so this cannot be looked up')}`);
+    } else if (!groups.length) {
       channel.appendLine(`      ${vscode.l10n.t('in no library here — so it is missing from your own build')}`);
     }
     for (const g of groups) channel.appendLine(`      ${g.name}  (${g.where.join(', ')})`);
@@ -69,13 +77,19 @@ async function decodeLinkError(channel) {
   channel.show(true);
 
   const found = rows.filter((r) => r.libs.length);
+  // A symbol this could not look up belongs in neither count, or the summary would claim a
+  // conclusion about it.
+  const answered = rows.filter((r) => !r.unknown);
   if (found.length) {
     vscode.window.showInformationMessage(
-      vscode.l10n.t('{0} of {1} symbols are in a library — link it.', String(found.length), String(rows.length)));
+      vscode.l10n.t('{0} of {1} symbols are in a library — link it.', String(found.length), String(answered.length)));
+  } else if (!answered.length) {
+    vscode.window.showWarningMessage(
+      vscode.l10n.t('None of these names can be looked up: an operator is mangled without one.'));
   } else {
     vscode.window.showWarningMessage(
       vscode.l10n.t('None of the {0} symbols is in a library here, so each one is missing from your own build.',
-        String(rows.length)));
+        String(answered.length)));
   }
   return rows;
 }

@@ -59,6 +59,54 @@ of a 600 MB SDK instead of starting `dumpbin` fifteen hundred times — under a 
 The architectures are part of the answer: a symbol found only under `x86` is the
 32-bit/64-bit mismatch that the error message itself never mentions.
 
+### GNU toolchains
+
+MinGW and clang report the same failure in their own words, and those are read too. Paste
+`undefined reference to` output from `ld` or `lld` and the answer has the same shape.
+
+```
+ld  __imp_CreateFileW
+      libkernel32.a  (lib)
+      libmincore.a  (lib)
+
+ld  Renderer::flush(int)
+      in no library here — so it is missing from your own build
+
+ld  std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::append(char const*)
+      libstdc++.a  (13-posix, 13-win32)
+
+ld  operator delete(void*)
+      an operator — a mangled name spells none, so this cannot be looked up
+```
+
+These linkers are harder to answer than MSVC, for the opposite reason. MSVC prints the
+decorated name beside the readable one, so a lookup is a comparison. GNU ld demangles for
+you, and `ns::deep(double)` matches nothing in an index that holds `_ZN2ns4deepEd`.
+
+Mangling it back is not possible — the parameter types are spelled for a reader, and a
+return type that never appears cannot be invented. But a mangled name puts the qualified
+name first, each part written as its length followed by its letters, so the beginning of it
+can be rebuilt exactly and matched as a prefix:
+
+| the linker says | this looks for |
+|---|---|
+| `ns::deep(double)` | `_ZN2ns4deepE` |
+| `K::cmethod(int) const` | `_ZNK1K7cmethodE` — `const` belongs to the front |
+| `std::cout` | `_ZSt4cout` — `std` is never spelled out |
+| `std::bad_alloc::~bad_alloc()` | `_ZNSt9bad_alloc` — a destructor keeps no name at all |
+
+A template class writes its arguments into the middle of its own name, which breaks the
+prefix; those are found by their components in order instead. Measured against the 7,204
+mangled symbols in a libstdc++.a: the prefix places 37.8% exactly, the components place
+another 46.8%, and the rest are the standard abbreviations for the stream types, which this
+does not carry. An operator is reported as unanswerable rather than as absent, because
+`operator delete(void*)` is `_ZdlPv` and spells no name to look for.
+
+Archives are looked for under the GNU toolchain on PATH — `lib`, `lib/gcc/<target>/<version>`
+and `<target>/lib` — as well as under MSVC and the Windows SDK, whichever error was pasted.
+A MinGW install keeps 892 Win32 import libraries in the third of those, which is how
+`__imp_CreateFileW` above comes back as `libkernel32.a`.
+
 ### Why not just read the docs
 
 MS documents LNK2019 well and lists eighteen ways to cause it. What no document can list is
@@ -149,6 +197,52 @@ LNK2019  CreateFileW
 
 아키텍처도 답의 일부임. `x86` 아래에서만 나온 심볼은 에러 메시지가 한마디도 안 하는 32비트·
 64비트 불일치임.
+
+### GNU 툴체인
+
+MinGW 와 clang 은 같은 실패를 제 말로 알리는데, 그쪽도 읽음. `ld` 나 `lld` 의
+`undefined reference to` 출력을 붙여넣으면 답의 모양이 같음.
+
+```
+ld  __imp_CreateFileW
+      libkernel32.a  (lib)
+      libmincore.a  (lib)
+
+ld  Renderer::flush(int)
+      이 PC 의 어느 라이브러리에도 없음 — 내 빌드에서 빠진 것임
+
+ld  std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::append(char const*)
+      libstdc++.a  (13-posix, 13-win32)
+
+ld  operator delete(void*)
+      연산자임 — 맹글된 이름에는 이름이 안 들어가 조회할 수 없음
+```
+
+이쪽이 MSVC 보다 답하기 어려운데 이유가 정반대임. MSVC 는 데코레이트된 이름을 읽을 수 있는
+이름 옆에 같이 찍어 줘서 조회가 그냥 비교임. GNU ld 는 친절하게 디맹글해 주는데, 인덱스에
+들어 있는 것은 `_ZN2ns4deepEd` 라 `ns::deep(double)` 로는 하나도 안 맞음.
+
+되맹글하는 것은 불가능함 — 인자 타입은 사람이 읽으라고 적힌 것이고, 아예 안 나오는 반환
+타입을 지어낼 수는 없음. 다만 맹글된 이름은 수식된 이름을 맨 앞에 두고 각 조각을 길이 다음에
+글자로 적으므로, **앞부분은 정확히 되살려** 접두사로 맞출 수 있음.
+
+| 링커가 찍는 것 | 찾아보는 것 |
+|---|---|
+| `ns::deep(double)` | `_ZN2ns4deepE` |
+| `K::cmethod(int) const` | `_ZNK1K7cmethodE` — `const` 는 뒤가 아니라 앞에 붙음 |
+| `std::cout` | `_ZSt4cout` — `std` 는 풀어 쓰는 법이 없음 |
+| `std::bad_alloc::~bad_alloc()` | `_ZNSt9bad_alloc` — 소멸자는 이름이 아예 안 남음 |
+
+템플릿 클래스는 제 이름 한가운데에 인자를 써 넣어서 접두사가 깨짐. 그런 것은 대신 컴포넌트가
+순서대로 나오는지로 찾음. libstdc++.a 의 맹글된 심볼 7,204개에 돌려 봄 — 접두사가 37.8% 를
+정확히 짚고, 컴포넌트가 46.8% 를 더 짚음. 남는 것은 스트림 타입의 표준 축약인데 그 표는 안
+들고 있음. 연산자는 "없음"이 아니라 "조회할 수 없음"으로 알림. `operator delete(void*)` 는
+`_ZdlPv` 라 찾아볼 이름이 하나도 안 적혀 있기 때문임.
+
+아카이브는 MSVC·윈도우 SDK 아래뿐 아니라 PATH 위의 GNU 툴체인 아래에서도 찾음 — `lib`,
+`lib/gcc/<타깃>/<버전>`, `<타깃>/lib`. 어느 쪽 에러를 붙여넣었든 둘 다 봄. MinGW 설치본은
+셋째 자리에 Win32 import 라이브러리 892개를 두고 있고, 위의 `__imp_CreateFileW` 가
+`libkernel32.a` 로 돌아오는 게 그 덕임.
 
 ### 문서를 읽으면 되지 않나
 

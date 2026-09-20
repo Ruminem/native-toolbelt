@@ -1,8 +1,8 @@
 {
   "name": "native-toolbelt",
   "displayName": "Native Toolbelt",
-  "description": "Tools for native development on Windows: which DLLs an executable needs and which of them this machine cannot find, and which library defines the symbol a link error could not resolve.",
-  "version": "0.2.0",
+  "description": "Tools for native development on Windows: which DLLs an executable needs and which of them this machine cannot find, and which library defines the symbol a link error could not resolve — MSVC and MinGW alike.",
+  "version": "0.3.0",
   "publisher": "Ruminem",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -20,7 +20,11 @@
     "dependencies",
     "windows",
     "linker",
-    "lnk2019"
+    "lnk2019",
+    "mingw",
+    "gcc",
+    "gnu",
+    "undefined-reference"
   ],
   "engines": {
     "vscode": "^1.80.0"

@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.3.0 — 2026-09-20
+
+- **Decode Link Error** now reads GNU `ld` and `lld` as well as MSVC, so a MinGW or clang
+  build gets the same answer: paste `undefined reference to 'ns::deep(double)'` and it names
+  the libraries on this machine that define it.
+- These linkers demangle the name before printing it, which is the whole difficulty — the
+  archive index holds `_ZN2ns4deepEd` and matches nothing you can read. The mangled name is
+  rebuilt from the front, as far as it can be rebuilt exactly, and matched as a prefix; a
+  template class writes its arguments into the middle of its own name, so those are found by
+  their components in order instead.
+- Archives are now looked for under the GNU toolchain on PATH as well as under MSVC and the
+  Windows SDK — `lib`, `lib/gcc/<target>/<version>` and `<target>/lib`, where a MinGW
+  install keeps libstdc++, libgcc and the 892 Win32 import libraries.
+- An operator reports as unanswerable rather than as absent. `operator delete(void*)` is
+  `_ZdlPv`, spelling no name at all, and "in no library here" would send you to look at your
+  own build over a question that was never asked.
+- A library reachable through two paths to the same folder is read once, not twice. A PATH
+  carrying both `/usr/bin` and `/bin` was finding 188 archives where there are 94.
+
+**한국어**
+
+- **링크 에러 해독**이 MSVC 에 더해 GNU `ld` 와 `lld` 도 읽음. MinGW 나 clang 으로 빌드해도
+  같은 답이 나옴 — `undefined reference to 'ns::deep(double)'` 을 붙여넣으면 이 PC 에서 그
+  심볼을 정의하는 라이브러리를 알려 줌
+- 이 링커들은 이름을 디맹글해서 찍는데 그게 바로 어려운 지점임. 아카이브 인덱스에 들어 있는
+  것은 `_ZN2ns4deepEd` 라 읽을 수 있는 쪽과는 하나도 안 맞음. 그래서 맹글된 이름의 앞부분을
+  정확히 되살릴 수 있는 데까지 되살려 접두사로 맞춤. 템플릿 클래스는 제 이름 한가운데에
+  인자를 써 넣으므로 그런 것은 대신 컴포넌트가 순서대로 나오는지로 찾음
+- 아카이브를 MSVC·윈도우 SDK 뿐 아니라 PATH 위의 GNU 툴체인 아래에서도 찾음 — `lib`,
+  `lib/gcc/<타깃>/<버전>`, `<타깃>/lib`. MinGW 설치본이 libstdc++·libgcc 와 Win32 import
+  라이브러리 892개를 두는 자리임
+- 연산자는 "없음"이 아니라 "조회할 수 없음"으로 알림. `operator delete(void*)` 는 `_ZdlPv` 라
+  이름이 아예 안 들어가는데, "어느 라이브러리에도 없음"이라고 하면 묻지도 않은 질문을 두고
+  제 빌드를 뒤지러 가게 됨
+- 같은 폴더로 이어지는 경로가 둘이면 한 번만 읽음. PATH 에 `/usr/bin` 과 `/bin` 이 같이 있으면
+  94개인 아카이브를 188개로 세고 있었음
+
 ## 0.2.0 — 2026-09-19
 
 - Second tool: **Decode Link Error**. Paste or select linker output and it names the symbol
