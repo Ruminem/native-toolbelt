@@ -215,15 +215,19 @@ function listLibs(dirs) {
  * built for every architecture, so the raw list is two dozen paths saying three things;
  * folded this way the architectures become the useful part — a symbol present only under
  * x86 is the 32-bit/64-bit mismatch that LNK2019 is otherwise silent about.
+ *
+ * These paths are always Windows paths — they come from the SDK and MSVC directories — so
+ * split them with `path.win32` rather than the host's separator. On Windows the two are the
+ * same call; off Windows it is the difference between a name and the whole path.
  * @param {string[]} libs @returns {{name: string, where: string[]}[]}
  */
 function groupLibs(libs) {
   const byName = new Map();
   for (const f of libs) {
-    const name = path.basename(f);
+    const name = path.win32.basename(f);
     const key = name.toLowerCase();
     if (!byName.has(key)) byName.set(key, { name, where: [] });
-    byName.get(key).where.push(path.basename(path.dirname(f)));
+    byName.get(key).where.push(path.win32.basename(path.win32.dirname(f)));
   }
   return [...byName.values()];
 }
