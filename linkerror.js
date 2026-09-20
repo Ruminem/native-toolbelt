@@ -208,9 +208,10 @@ function newest(list) {
 }
 
 /**
- * The lib directories MSVC and the Windows SDK lay down, found by walking their fixed
- * layout rather than by running vswhere: the point of this extension is that it answers
- * with nothing installed beyond what is being asked about.
+ * Every lib directory a toolchain on this machine laid down: MSVC and the Windows SDK,
+ * found by walking their fixed layout rather than by running vswhere, and MinGW, found
+ * through PATH because it has no fixed layout to walk. The point of this extension is that
+ * it answers with nothing installed beyond what is being asked about.
  * ponytail: newest version of each product only. Add a setting if someone pins an old SDK.
  * @returns {string[]}
  */
@@ -229,7 +230,65 @@ function libDirs() {
     // architecture is what makes a 64-bit/32-bit mismatch visible instead of invisible.
     if (kit) for (const group of subdirs(kit)) dirs.push(...subdirs(group));
   }
+  return [...dirs, ...mingwDirs()];
+}
+
+// Every target MinGW builds for spells it in the triplet — x86_64-w64-mingw32, the i686 and
+// ucrt variants beside it — so requiring the word is what keeps a Linux or MSVC prefix out
+// of a walk that starts from any gcc at all.
+const MINGW_TARGET = /mingw/i;
+// gcc as the distributions name it. MSYS2, WinLibs and mingw-builds put both spellings in
+// the same bin folder; a cross toolchain ships only the prefixed one. The extensionless
+// names cost one stat each on Windows and are what let this be tested off it.
+const GCC_NAMES = ['gcc.exe', 'x86_64-w64-mingw32-gcc.exe', 'gcc', 'x86_64-w64-mingw32-gcc'];
+
+/**
+ * The lib directories of the MinGW installation whose gcc sits in `bin`.
+ *
+ * MinGW has no registry key and no fixed folder: MSYS2, WinLibs, mingw-builds and TDM each
+ * unpack somewhere different. What is true of a machine that can build with it is that its
+ * gcc is on PATH, and from the compiler GCC's own layout gives the rest. Nothing is run —
+ * `gcc -print-search-dirs` would answer exactly, but starting a compiler to read a link
+ * error is the sort of thing this extension exists not to do.
+ * @param {string} bin a directory holding gcc
+ * @returns {string[]}
+ */
+function mingwDirsFrom(bin) {
+  const prefix = path.dirname(bin);
+  const targets = subdirs(prefix).filter((d) => MINGW_TARGET.test(path.basename(d)));
+  if (!targets.length) return []; // a gcc, but not a MinGW one
+  // <prefix>/lib is what the distribution added, <target>/lib holds the Windows import
+  // libraries, and lib/gcc/<target>/<version> holds libstdc++ and libgcc. Every version is
+  // kept rather than the newest: there is rarely more than one, and a stale one is a few
+  // directories rather than a scan — 910 archives measured at under 100 ms.
+  const dirs = [path.join(prefix, 'lib')];
+  for (const t of targets) dirs.push(path.join(t, 'lib'));
+  for (const t of subdirs(path.join(prefix, 'lib', 'gcc'))) {
+    if (MINGW_TARGET.test(path.basename(t))) dirs.push(...subdirs(t));
+  }
   return dirs;
+}
+
+/**
+ * The same, for every MinGW on PATH. Host paths, not Windows ones: PATH is read from the
+ * machine this runs on, so it is split and joined the host's way.
+ * @returns {string[]}
+ */
+function mingwDirs() {
+  const out = [];
+  const seen = new Set();
+  for (const entry of (process.env.PATH || '').split(path.delimiter)) {
+    if (!entry || !GCC_NAMES.some((n) => fs.existsSync(path.join(entry, n)))) continue;
+    for (const d of mingwDirsFrom(entry)) {
+      // One tree reached twice — /bin and /usr/bin, or a folder listed in PATH twice — is
+      // one tree, and scanning it twice would report every library as two libraries.
+      const key = d.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(d);
+    }
+  }
+  return out;
 }
 
 /** @param {string[]} dirs @returns {string[]} the archives directly inside them */
@@ -258,15 +317,27 @@ function listLibs(dirs) {
  * same call; off Windows it is the difference between a name and the whole path.
  * @param {string[]} libs @returns {{name: string, where: string[]}[]}
  */
+function placeOf(file) {
+  const dir = path.win32.dirname(file);
+  const name = path.win32.basename(dir);
+  // MSVC and the SDK end their paths with the architecture, which is the useful word. MinGW
+  // ends every one of them with \lib, which is no word at all, so there the folder above —
+  // the target triplet, or the distribution — is what tells two finds apart.
+  return name.toLowerCase() === 'lib' ? path.win32.basename(path.win32.dirname(dir)) : name;
+}
+
 function groupLibs(libs) {
   const byName = new Map();
   for (const f of libs) {
     const name = path.win32.basename(f);
     const key = name.toLowerCase();
     if (!byName.has(key)) byName.set(key, { name, where: [] });
-    byName.get(key).where.push(path.win32.basename(path.win32.dirname(f)));
+    byName.get(key).where.push(placeOf(f));
   }
   return [...byName.values()];
 }
 
-module.exports = { parseErrors, isDemangled, candidates, scan, decode, libDirs, listLibs, groupLibs };
+module.exports = {
+  parseErrors, isDemangled, candidates, scan, decode,
+  libDirs, mingwDirs, mingwDirsFrom, listLibs, groupLibs,
+};

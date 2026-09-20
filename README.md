@@ -66,7 +66,9 @@ its names come out whole and none of the guessing below is needed:
 
 ```
 ld  __imp_WSAStartup
-      libws2_32.a  (lib)
+      libmincore.a  (x86_64-w64-mingw32)
+      libws2_32.a  (x86_64-w64-mingw32)
+      libwsock32.a  (x86_64-w64-mingw32)
 
 ld  plain_c_function
       in no library here — so it is missing from your own build
@@ -76,10 +78,20 @@ ld  plain_c_function
 times is folded back into one answer. The one thing it does that MSVC does not is demangle
 C++ names before printing them: an index holds `_Z11missing_toov`, the message says
 `missing_too()`, and no search turns one into the other — so such a name is reported as
-unfindable, together with the flag that prints it raw, `-Wl,--no-demangle`.
+unfindable, together with the flag that prints it raw, `-Wl,--no-demangle`. Relinking with
+it is worth the minute:
 
-The libraries searched are the ones in your workspace plus the MSVC and Windows SDK
-directories. A MinGW installation's own `lib` folder is not found on its own yet.
+```
+ld  _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEED1Ev
+      libstdc++.a  (13-posix, 13-win32)
+      libstdc++.dll.a  (13-posix, 13-win32)
+```
+
+MinGW's own libraries are searched along with your workspace, MSVC and the Windows SDK.
+MinGW lives wherever it was unpacked — MSYS2, WinLibs, mingw-builds and TDM all differ —
+so the anchor is the compiler on your `PATH`: from the folder holding `gcc.exe`, GCC's own
+layout gives `<target>\lib` and `lib\gcc\<target>\<version>`, which is where the Windows
+import libraries and `libstdc++` are. The folders are read; no compiler is started.
 
 ### Why not just read the docs
 
@@ -179,7 +191,9 @@ MinGW gcc 뒤에 있는 GNU `ld` 도 같이 읽음. `ld` 는 심볼을 따옴표
 
 ```
 ld  __imp_WSAStartup
-      libws2_32.a  (lib)
+      libmincore.a  (x86_64-w64-mingw32)
+      libws2_32.a  (x86_64-w64-mingw32)
+      libwsock32.a  (x86_64-w64-mingw32)
 
 ld  plain_c_function
       이 PC 의 어느 라이브러리에도 없음 — 내 빌드에서 빠진 것임
@@ -189,10 +203,19 @@ ld  plain_c_function
 줌. MSVC 와 다른 점 하나는 C++ 이름을 demangle 해서 찍는다는 것임 — 인덱스에 있는 것은
 `_Z11missing_toov` 인데 메시지는 `missing_too()` 라 적고, 어떤 검색으로도 한쪽이 다른 쪽이 되지
 않음. 그래서 그런 이름은 못 찾는다고 말하고 날것으로 찍게 하는 플래그 `-Wl,--no-demangle` 을
-같이 알려 줌.
+같이 알려 줌. 그걸 붙여 다시 링크할 값어치가 있음.
 
-뒤지는 라이브러리는 워크스페이스 안의 것과 MSVC·윈도우 SDK 폴더임. MinGW 설치본의 `lib` 폴더는
-아직 스스로 찾지 못함.
+```
+ld  _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEED1Ev
+      libstdc++.a  (13-posix, 13-win32)
+      libstdc++.dll.a  (13-posix, 13-win32)
+```
+
+MinGW 자신의 라이브러리도 워크스페이스·MSVC·윈도우 SDK 와 함께 뒤짐. MinGW 는 푼 자리에
+그냥 있음 — MSYS2·WinLibs·mingw-builds·TDM 이 다 다름 — 그래서 닻으로 삼는 것은 `PATH` 의
+컴파일러임. `gcc.exe` 가 있는 폴더에서 GCC 자신의 레이아웃을 따라가면 `<타겟>\lib` 과
+`lib\gcc\<타겟>\<버전>` 이 나오고, 윈도우 임포트 라이브러리와 `libstdc++` 이 거기 있음.
+폴더를 읽을 뿐 컴파일러를 띄우지는 않음.
 
 ### 문서를 읽으면 되지 않나
 

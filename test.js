@@ -2,11 +2,14 @@
 'use strict';
 const assert = require('assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { readImports } = require('./pe');
 const { resolveImports } = require('./resolve');
 const { readSymbolNames } = require('./ar');
-const { parseErrors, isDemangled, decode, libDirs, listLibs, groupLibs } = require('./linkerror');
+const {
+  parseErrors, isDemangled, decode, libDirs, mingwDirs, mingwDirsFrom, listLibs, groupLibs,
+} = require('./linkerror');
 
 // Windows ships these, so the test has a real 64-bit and a real 32-bit binary to read.
 const root = process.env.SystemRoot || 'C:\\Windows';
@@ -164,6 +167,57 @@ assert.deepStrictEqual(
     { name: 'mincore.lib', where: ['x64'] },
   ]
 );
+
+// A MinGW path ends in \lib, which names nothing. The folder above it is what does.
+assert.deepStrictEqual(
+  groupLibs([
+    'C:\\mingw64\\x86_64-w64-mingw32\\lib\\libws2_32.a',
+    'C:\\mingw64\\lib\\gcc\\x86_64-w64-mingw32\\13.2.0\\libstdc++.a',
+  ]),
+  [
+    { name: 'libws2_32.a', where: ['x86_64-w64-mingw32'] },
+    { name: 'libstdc++.a', where: ['13.2.0'] },
+  ]
+);
+
+// A MinGW tree, laid down in a temp folder rather than looked for. MinGW installs wherever
+// it was unpacked, so there is no path to point a test at; what is under test is the walk.
+const tree = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbelt-mingw-'));
+const otherGcc = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbelt-gcc-'));
+try {
+  for (const d of [['bin'], ['lib'], ['x86_64-w64-mingw32', 'lib'], ['lib', 'gcc', 'x86_64-w64-mingw32', '13.2.0']]) {
+    fs.mkdirSync(path.join(tree, ...d), { recursive: true });
+  }
+  fs.writeFileSync(path.join(tree, 'bin', 'gcc.exe'), '');
+  // A gcc with no target folder beside it belongs to some other toolchain.
+  fs.mkdirSync(path.join(otherGcc, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(otherGcc, 'lib'), { recursive: true });
+  fs.writeFileSync(path.join(otherGcc, 'bin', 'gcc.exe'), '');
+
+  assert.deepStrictEqual(mingwDirsFrom(path.join(tree, 'bin')), [
+    path.join(tree, 'lib'),
+    path.join(tree, 'x86_64-w64-mingw32', 'lib'),
+    path.join(tree, 'lib', 'gcc', 'x86_64-w64-mingw32', '13.2.0'),
+  ]);
+  assert.deepStrictEqual(mingwDirsFrom(path.join(otherGcc, 'bin')), [],
+    'a gcc that is not MinGW must contribute no directories');
+
+  const savedPath = process.env.PATH;
+  try {
+    // Twice on PATH is still one tree on disk, and scanning it twice would report every
+    // library it holds as two libraries.
+    process.env.PATH = [path.join(tree, 'bin'), path.join(otherGcc, 'bin'), path.join(tree, 'bin')]
+      .join(path.delimiter);
+    assert.deepStrictEqual(mingwDirs(), mingwDirsFrom(path.join(tree, 'bin')));
+    process.env.PATH = path.join(otherGcc, 'bin');
+    assert.deepStrictEqual(mingwDirs(), []);
+  } finally {
+    process.env.PATH = savedPath;
+  }
+} finally {
+  fs.rmSync(tree, { recursive: true, force: true });
+  fs.rmSync(otherGcc, { recursive: true, force: true });
+}
 
 // Every translated string must exist in every translation, or a Korean window falls back to English.
 const read = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));

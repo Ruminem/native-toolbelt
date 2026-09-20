@@ -10,6 +10,12 @@
 - A C++ name that `ld` demangled cannot be found in any archive index, which holds the
   mangled form. That is now said as such, with the `-Wl,--no-demangle` flag that prints the
   name an index can match, rather than reported as a symbol that exists nowhere.
+- MinGW's own libraries are searched too, found through the gcc on your `PATH` rather than a
+  fixed folder, since MSYS2, WinLibs and mingw-builds each install somewhere different.
+  Measured at 928 more archives for under 100 ms.
+- A library found under a folder simply called `lib`, as every MinGW one is, is now listed
+  under the folder above it — the target triplet or the gcc version — instead of under a
+  word that tells two finds apart no better than none.
 
 **한국어**
 
@@ -20,6 +26,10 @@
 - `ld` 가 demangle 한 C++ 이름은 맹글된 이름을 들고 있는 아카이브 인덱스에서 절대 안 걸림.
   이제 그것을 어디에도 없는 심볼이라고 하지 않고, 인덱스가 맞춰 볼 수 있는 이름으로 찍게 하는
   `-Wl,--no-demangle` 과 함께 그렇다고 말해 줌
+- MinGW 자신의 라이브러리도 같이 뒤짐. MSYS2·WinLibs·mingw-builds 가 다 다른 자리에 깔리므로
+  고정 폴더가 아니라 `PATH` 의 gcc 에서 찾아감. 아카이브 928개가 늘었는데 100ms 아래로 측정됨
+- MinGW 경로처럼 폴더 이름이 그냥 `lib` 인 자리에서 찾은 라이브러리는 **한 단계 위** 폴더 이름
+  (타겟 트리플릿이나 gcc 버전)으로 적음. `lib` 은 두 자리를 가르는 데 아무 도움이 안 됨
 
 ## 0.2.0 — 2026-09-19
 
