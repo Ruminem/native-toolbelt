@@ -1,5 +1,6 @@
 test.js
 uitest.js
 NEXT.md
+.github/
 *.vsix
 .gitignore
