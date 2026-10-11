@@ -1,6 +1,9 @@
 test.js
 uitest.js
+test-gnu.a
+test-gnu-decoy.a
 NEXT.md
+CLAUDE.md
 .github/
 *.vsix
 .gitignore
